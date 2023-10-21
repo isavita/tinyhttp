@@ -7,12 +7,11 @@ import (
 	"strings"
 )
 
-func HttpGet(url string) {
-	host, path := parseURL(url)
-	conn, err := net.Dial("tcp", host+":80")
+func HttpGet(url string) error {
+	host, port, path := parseURL(url)
+	conn, err := net.Dial("tcp", host+":"+port)
 	if err != nil {
-		fmt.Println("Error:", err)
-		return
+		return err
 	}
 	defer conn.Close()
 
@@ -29,16 +28,24 @@ func HttpGet(url string) {
 		if err != nil {
 			break
 		}
-		fmt.Print(string(buf[:n]))
+		os.Stdout.Write(buf[:n])
 	}
+	return nil
 }
 
-func parseURL(url string) (string, string) {
-	// Assuming the URL is well-formed and has a scheme followed by the host
+func parseURL(url string) (string, string, string) {
 	parts := strings.Split(url, "/")
-	host := parts[2]
+	hostPart := parts[2]
+	hostParts := strings.Split(hostPart, ":")
+	host := hostParts[0]
+	var port string
+	if len(hostParts) > 1 {
+		port = hostParts[1]
+	} else {
+		port = "80"
+	}
 	path := "/" + strings.Join(parts[3:], "/")
-	return host, path
+	return host, port, path
 }
 
 func main() {

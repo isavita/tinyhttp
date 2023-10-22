@@ -11,10 +11,22 @@ import (
 	"strings"
 )
 
-var (
-	showHeaders     = flag.Bool("i", false, "Show response headers")
-	showOnlyHeaders = flag.Bool("I", false, "Show only response headers")
-)
+type HttpFlags struct {
+	ShowHeaders     bool
+	ShowOnlyHeaders bool
+}
+
+func parseFlags() *HttpFlags {
+	showHeaders := flag.Bool("i", false, "Show response headers")
+	showOnlyHeaders := flag.Bool("I", false, "Show only response headers")
+
+	flag.Parse()
+
+	return &HttpFlags{
+		ShowHeaders:     *showHeaders,
+		ShowOnlyHeaders: *showOnlyHeaders,
+	}
+}
 
 func parseURL(url string) (string, string, string) {
 	parts := strings.Split(url, "/")
@@ -149,7 +161,7 @@ func readChunkedResponse(reader io.Reader) error {
 	return nil
 }
 
-func HttpGet(url string, showHeaders, showOnlyHeaders bool) error {
+func HttpGet(url string, flags *HttpFlags) error {
 	host, port, path := parseURL(url)
 	conn, err := net.Dial("tcp", host+":"+port)
 	if err != nil {
@@ -172,9 +184,9 @@ func HttpGet(url string, showHeaders, showOnlyHeaders bool) error {
 		return err
 	}
 
-	if showHeaders || showOnlyHeaders {
+	if flags.ShowHeaders || flags.ShowOnlyHeaders {
 		fmt.Println(headers) // Print headers
-		if showOnlyHeaders {
+		if flags.ShowOnlyHeaders {
 			return nil // Return early if only headers should be shown
 		}
 	}
@@ -189,7 +201,6 @@ func HttpGet(url string, showHeaders, showOnlyHeaders bool) error {
 }
 
 func main() {
-	flag.Parse()
 	if len(os.Args) < 2 {
 		fmt.Println("Usage: go run tinyhttp.go <url>")
 		return
@@ -200,5 +211,6 @@ func main() {
 	} else {
 		url = os.Args[1]
 	}
-	HttpGet(url, *showHeaders, *showOnlyHeaders)
+	flags := parseFlags()
+	HttpGet(url, flags)
 }

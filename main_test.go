@@ -32,8 +32,8 @@ func runTestServer(t *testing.T, mux *http.ServeMux, addr string) (*os.File, *os
 	return r, w, cleanup
 }
 
-func runHttpGetAndCaptureOutput(t *testing.T, r *os.File, w *os.File, url string, showHeaders, showOnlyHeaders bool) string {
-	err := HttpGet(url, showHeaders, showOnlyHeaders)
+func runHttpGetAndCaptureOutput(t *testing.T, r *os.File, w *os.File, url string, flags *HttpFlags) string {
+	err := HttpGet(url, flags)
 	if err != nil {
 		t.Fatalf("HttpGet failed: %v", err)
 	}
@@ -55,7 +55,11 @@ func TestHttpGetNonChunkedResponse(t *testing.T) {
 	r, w, cleanup := runTestServer(t, mux, "127.0.0.1:8080")
 	defer cleanup()
 
-	response := runHttpGetAndCaptureOutput(t, r, w, "http://127.0.0.1:8080/", false, false)
+	flags := &HttpFlags{
+		ShowHeaders:     false,
+		ShowOnlyHeaders: false,
+	}
+	response := runHttpGetAndCaptureOutput(t, r, w, "http://127.0.0.1:8080/", flags)
 	if response != content {
 		t.Fatalf("Expected response to end with %q, got %q", content, response)
 	}
@@ -70,10 +74,14 @@ func TestHttpGetChunkedResponse(t *testing.T) {
 		}
 	})
 
-	r, w, cleanup := runTestServer(t, mux, "127.0.0.1:8081") // Different port
+	r, w, cleanup := runTestServer(t, mux, "127.0.0.1:8080") // Different port
 	defer cleanup()
 
-	response := runHttpGetAndCaptureOutput(t, r, w, "http://127.0.0.1:8081/", false, false) // Different port
+	flags := &HttpFlags{
+		ShowHeaders:     false,
+		ShowOnlyHeaders: false,
+	}
+	response := runHttpGetAndCaptureOutput(t, r, w, "http://127.0.0.1:8080/", flags) // Different port
 	expectedResponse := "Hello, world!"
 	if response != expectedResponse {
 		t.Fatalf("Expected response to be %q, got %q", expectedResponse, response)
@@ -89,9 +97,16 @@ func TestHttpGetWithHeaders(t *testing.T) {
 	r, w, cleanup := runTestServer(t, mux, "127.0.0.1:8080")
 	defer cleanup()
 
-	response := runHttpGetAndCaptureOutput(t, r, w, "http://127.0.0.1:8080/", true, false)
+	flags := &HttpFlags{
+		ShowHeaders:     true,
+		ShowOnlyHeaders: false,
+	}
+	response := runHttpGetAndCaptureOutput(t, r, w, "http://127.0.0.1:8080/", flags)
 	if !strings.Contains(response, "HTTP/1.1") {
 		t.Fatalf("Expected response to contain headers, got %q", response)
+	}
+	if !strings.Contains(response, "Hello, world!") {
+		t.Fatalf("Expected response to contain body, got %q", response)
 	}
 }
 
@@ -101,10 +116,14 @@ func TestHttpGetHeadersOnly(t *testing.T) {
 		fmt.Fprint(w, "Hello, world!")
 	})
 
-	r, w, cleanup := runTestServer(t, mux, "127.0.0.1:8083")
+	r, w, cleanup := runTestServer(t, mux, "127.0.0.1:8080")
 	defer cleanup()
 
-	response := runHttpGetAndCaptureOutput(t, r, w, "http://127.0.0.1:8083/", false, true)
+	flags := &HttpFlags{
+		ShowHeaders:     false,
+		ShowOnlyHeaders: true,
+	}
+	response := runHttpGetAndCaptureOutput(t, r, w, "http://127.0.0.1:8080/", flags)
 	if !strings.Contains(response, "HTTP/1.1") || strings.Contains(response, "Hello, world!") {
 		t.Fatalf("Expected response to contain headers only, got %q", response)
 	}

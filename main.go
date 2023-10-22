@@ -20,13 +20,14 @@ type HttpFlags struct {
 }
 
 func parseFlags() *HttpFlags {
-	showHeaders := pflag.Bool("i", false, "Show response headers")
-	showOnlyHeaders := pflag.Bool("I", false, "Show only response headers")
+	fs := pflag.NewFlagSet("tinyhttp", pflag.ExitOnError)
+	showHeaders := fs.BoolP("show-headers", "i", false, "Show response headers")
+	showOnlyHeaders := fs.BoolP("show-only-headers", "I", false, "Show only response headers")
 	var customHeaders []string
-	pflag.StringSliceVar(&customHeaders, "H", nil, "Custom headers to include in the request")
-	outputFile := pflag.String("o", "", "Output to file instead of stdout")
+	fs.StringSliceVarP(&customHeaders, "custom-headers", "H", nil, "Custom headers to include in the request")
+	outputFile := fs.StringP("output-file", "o", "", "Output to file instead of stdout")
 
-	pflag.Parse()
+	fs.Parse(os.Args[1:])
 
 	return &HttpFlags{
 		ShowHeaders:     *showHeaders,

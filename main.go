@@ -2,12 +2,18 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"strconv"
 	"strings"
+)
+
+var (
+	showHeaders     = flag.Bool("i", false, "Show response headers")
+	showOnlyHeaders = flag.Bool("I", false, "Show only response headers")
 )
 
 func parseURL(url string) (string, string, string) {
@@ -43,6 +49,7 @@ func readHeaders(reader *bufio.Reader) (string, bool, error) {
 	}
 	return headers.String(), isChunked, nil
 }
+
 func readNonChunkedResponse(reader *bufio.Reader) {
 	buf := make([]byte, 4096)
 	for {
@@ -67,12 +74,10 @@ func readLine(reader io.Reader) (string, error) {
 	return strings.TrimRight(line, "\r\n"), err
 }
 
-// Trims whitespace characters from a string.
 func trimSpace(line string) string {
 	return strings.TrimSpace(line)
 }
 
-// Parses a string as a hexadecimal integer.
 func parseIntHex(hexString string) (int64, error) {
 	return strconv.ParseInt(hexString, 16, 64)
 }
@@ -144,7 +149,7 @@ func readChunkedResponse(reader io.Reader) error {
 	return nil
 }
 
-func HttpGet(url string) error {
+func HttpGet(url string, showHeaders, showOnlyHeaders bool) error {
 	host, port, path := parseURL(url)
 	conn, err := net.Dial("tcp", host+":"+port)
 	if err != nil {
@@ -162,9 +167,16 @@ func HttpGet(url string) error {
 	reader := bufio.NewReader(conn)
 
 	// Read headers
-	_, isChunked, err := readHeaders(reader)
+	headers, isChunked, err := readHeaders(reader)
 	if err != nil {
 		return err
+	}
+
+	if showHeaders || showOnlyHeaders {
+		fmt.Println(headers) // Print headers
+		if showOnlyHeaders {
+			return nil // Return early if only headers should be shown
+		}
 	}
 
 	if isChunked {
@@ -177,10 +189,16 @@ func HttpGet(url string) error {
 }
 
 func main() {
-	if len(os.Args) != 2 {
+	flag.Parse()
+	if len(os.Args) < 2 {
 		fmt.Println("Usage: go run tinyhttp.go <url>")
 		return
 	}
-	url := os.Args[1]
-	HttpGet(url)
+	var url string
+	if len(os.Args) > 2 {
+		url = os.Args[len(os.Args)-1]
+	} else {
+		url = os.Args[1]
+	}
+	HttpGet(url, *showHeaders, *showOnlyHeaders)
 }

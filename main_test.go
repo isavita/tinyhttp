@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -31,8 +32,8 @@ func runTestServer(t *testing.T, mux *http.ServeMux, addr string) (*os.File, *os
 	return r, w, cleanup
 }
 
-func runHttpGetAndCaptureOutput(t *testing.T, r *os.File, w *os.File, url string) string {
-	err := HttpGet(url)
+func runHttpGetAndCaptureOutput(t *testing.T, r *os.File, w *os.File, url string, showHeaders, showOnlyHeaders bool) string {
+	err := HttpGet(url, showHeaders, showOnlyHeaders)
 	if err != nil {
 		t.Fatalf("HttpGet failed: %v", err)
 	}
@@ -54,7 +55,7 @@ func TestHttpGetNonChunkedResponse(t *testing.T) {
 	r, w, cleanup := runTestServer(t, mux, "127.0.0.1:8080")
 	defer cleanup()
 
-	response := runHttpGetAndCaptureOutput(t, r, w, "http://127.0.0.1:8080/")
+	response := runHttpGetAndCaptureOutput(t, r, w, "http://127.0.0.1:8080/", false, false)
 	if response != content {
 		t.Fatalf("Expected response to end with %q, got %q", content, response)
 	}
@@ -72,9 +73,39 @@ func TestHttpGetChunkedResponse(t *testing.T) {
 	r, w, cleanup := runTestServer(t, mux, "127.0.0.1:8081") // Different port
 	defer cleanup()
 
-	response := runHttpGetAndCaptureOutput(t, r, w, "http://127.0.0.1:8081/") // Different port
+	response := runHttpGetAndCaptureOutput(t, r, w, "http://127.0.0.1:8081/", false, false) // Different port
 	expectedResponse := "Hello, world!"
 	if response != expectedResponse {
 		t.Fatalf("Expected response to be %q, got %q", expectedResponse, response)
+	}
+}
+
+func TestHttpGetWithHeaders(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "Hello, world!")
+	})
+
+	r, w, cleanup := runTestServer(t, mux, "127.0.0.1:8080")
+	defer cleanup()
+
+	response := runHttpGetAndCaptureOutput(t, r, w, "http://127.0.0.1:8080/", true, false)
+	if !strings.Contains(response, "HTTP/1.1") {
+		t.Fatalf("Expected response to contain headers, got %q", response)
+	}
+}
+
+func TestHttpGetHeadersOnly(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "Hello, world!")
+	})
+
+	r, w, cleanup := runTestServer(t, mux, "127.0.0.1:8083")
+	defer cleanup()
+
+	response := runHttpGetAndCaptureOutput(t, r, w, "http://127.0.0.1:8083/", false, true)
+	if !strings.Contains(response, "HTTP/1.1") || strings.Contains(response, "Hello, world!") {
+		t.Fatalf("Expected response to contain headers only, got %q", response)
 	}
 }

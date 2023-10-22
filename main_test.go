@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func runTestServer(t *testing.T, mux *http.ServeMux, addr string) (*os.File, *os.File, func()) {
@@ -17,6 +18,7 @@ func runTestServer(t *testing.T, mux *http.ServeMux, addr string) (*os.File, *os
 		Handler: mux,
 	}
 	go server.ListenAndServe()
+	time.Sleep(5 * time.Millisecond)
 
 	// Redirect stdout to a buffer
 	oldStdout := os.Stdout
@@ -32,8 +34,8 @@ func runTestServer(t *testing.T, mux *http.ServeMux, addr string) (*os.File, *os
 	return r, w, cleanup
 }
 
-func runHttpGetAndCaptureOutput(t *testing.T, r *os.File, w *os.File, url string, flags *HttpFlags) string {
-	err := HttpGet(url, flags)
+func runHttpGetAndCaptureOutput(t *testing.T, r *os.File, w *os.File, url string, output io.Writer, flags *HttpFlags) string {
+	err := HttpGet(url, output, flags)
 	if err != nil {
 		t.Fatalf("HttpGet failed: %v", err)
 	}
@@ -59,7 +61,7 @@ func TestHttpGetNonChunkedResponse(t *testing.T) {
 		ShowHeaders:     false,
 		ShowOnlyHeaders: false,
 	}
-	response := runHttpGetAndCaptureOutput(t, r, w, "http://127.0.0.1:8080/", flags)
+	response := runHttpGetAndCaptureOutput(t, r, w, "http://127.0.0.1:8080/", os.Stdout, flags)
 	if response != content {
 		t.Fatalf("Expected response to end with %q, got %q", content, response)
 	}
@@ -81,7 +83,7 @@ func TestHttpGetChunkedResponse(t *testing.T) {
 		ShowHeaders:     false,
 		ShowOnlyHeaders: false,
 	}
-	response := runHttpGetAndCaptureOutput(t, r, w, "http://127.0.0.1:8080/", flags) // Different port
+	response := runHttpGetAndCaptureOutput(t, r, w, "http://127.0.0.1:8080/", os.Stdout, flags) // Different port
 	expectedResponse := "Hello, world!"
 	if response != expectedResponse {
 		t.Fatalf("Expected response to be %q, got %q", expectedResponse, response)
@@ -101,7 +103,7 @@ func TestHttpGetWithHeaders(t *testing.T) {
 		ShowHeaders:     true,
 		ShowOnlyHeaders: false,
 	}
-	response := runHttpGetAndCaptureOutput(t, r, w, "http://127.0.0.1:8080/", flags)
+	response := runHttpGetAndCaptureOutput(t, r, w, "http://127.0.0.1:8080/", os.Stdout, flags)
 	if !strings.Contains(response, "HTTP/1.1") {
 		t.Fatalf("Expected response to contain headers, got %q", response)
 	}
@@ -123,7 +125,7 @@ func TestHttpGetHeadersOnly(t *testing.T) {
 		ShowHeaders:     false,
 		ShowOnlyHeaders: true,
 	}
-	response := runHttpGetAndCaptureOutput(t, r, w, "http://127.0.0.1:8080/", flags)
+	response := runHttpGetAndCaptureOutput(t, r, w, "http://127.0.0.1:8080/", os.Stdout, flags)
 	if !strings.Contains(response, "HTTP/1.1") || strings.Contains(response, "Hello, world!") {
 		t.Fatalf("Expected response to contain headers only, got %q", response)
 	}
@@ -154,7 +156,7 @@ func TestHttpGetAcceptHeader(t *testing.T) {
 	flags := &HttpFlags{
 		CustomHeaders: []string{"Accept: text/plain"},
 	}
-	response := runHttpGetAndCaptureOutput(t, r, w, "http://127.0.0.1:8080/", flags)
+	response := runHttpGetAndCaptureOutput(t, r, w, "http://127.0.0.1:8080/", os.Stdout, flags)
 
 	fmt.Println(response)
 	// Verify the text/plain response
@@ -171,7 +173,7 @@ func TestHttpGetAcceptHeader(t *testing.T) {
 	flags = &HttpFlags{
 		CustomHeaders: []string{"Accept: application/xml"},
 	}
-	response = runHttpGetAndCaptureOutput(t, r, w, "http://127.0.0.1:8080/", flags)
+	response = runHttpGetAndCaptureOutput(t, r, w, "http://127.0.0.1:8080/", os.Stdout, flags)
 
 	// Verify the application/xml response
 	expectedResponse = "<greeting>Hello, world!</greeting>"
@@ -204,9 +206,90 @@ func TestHttpGetWithMultipleHeaders(t *testing.T) {
 		},
 	}
 
-	response := runHttpGetAndCaptureOutput(t, r, w, "http://127.0.0.1:8080/", flags)
+	response := runHttpGetAndCaptureOutput(t, r, w, "http://127.0.0.1:8080/", os.Stdout, flags)
 	expectedResponse := "Authentication successful!"
 	if response != expectedResponse {
 		t.Fatalf("Expected response to be %q, got %q", expectedResponse, response)
+	}
+}
+
+func TestHttpGetWithOutputToFile(t *testing.T) {
+	content := "Hello, file output!"
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, content)
+	})
+
+	// Start the test server
+	r, w, cleanup := runTestServer(t, mux, "127.0.0.1:8080")
+	defer cleanup()
+
+	// Generate a unique file name using a timestamp
+	timeStamp := time.Now().UnixNano()
+	fileName := fmt.Sprintf("tmp_output_%d.txt", timeStamp)
+	defer os.Remove(fileName)
+	file, err := CreateOutputFile(fileName)
+	if err != nil {
+		t.Fatalf("Failed to create output file: %v", err)
+	}
+	flags := &HttpFlags{
+		OutputFile: fileName,
+	}
+
+	response := runHttpGetAndCaptureOutput(t, r, w, "http://127.0.0.1:8080/", file, flags)
+
+	// Check the response is empty
+	if response != "" {
+		t.Fatalf("Expected response to be empty, got %q", response)
+	}
+	// Check the contents of the output file
+	data, err := os.ReadFile(fileName)
+	if err != nil {
+		t.Fatalf("Failed to read output file: %v", err)
+	}
+	if string(data) != content {
+		t.Fatalf("Expected output file to contain %q, got %q", content, string(data))
+	}
+}
+
+func TestHttpGetHeadersOnlyOutputToFile(t *testing.T) {
+	content := "Hello, world!"
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, content)
+	})
+
+	// Start the test server
+	r, w, cleanup := runTestServer(t, mux, "127.0.0.1:8084")
+	defer cleanup()
+
+	// Generate a unique file name using a timestamp
+	timeStamp := time.Now().UnixNano()
+	fileName := fmt.Sprintf("tmp_output_%d.txt", timeStamp)
+	defer os.Remove(fileName)
+	file, err := CreateOutputFile(fileName)
+	if err != nil {
+		t.Fatalf("Failed to create output file: %v", err)
+	}
+
+	flags := &HttpFlags{
+		ShowOnlyHeaders: true,
+		OutputFile:      fileName,
+	}
+
+	response := runHttpGetAndCaptureOutput(t, r, w, "http://127.0.0.1:8084/", file, flags) // Execute the HTTP GET request
+
+	// Check that the response is empty
+	if response != "" {
+		t.Fatalf("Expected response to be empty, got %q", response)
+	}
+
+	// Check the contents of the output file
+	data, err := os.ReadFile(fileName)
+	if err != nil {
+		t.Fatalf("Failed to read output file: %v", err)
+	}
+	if !strings.Contains(string(data), "HTTP/1.1") || strings.Contains(string(data), content) {
+		t.Fatalf("Expected output file to contain headers only, got %q", string(data))
 	}
 }

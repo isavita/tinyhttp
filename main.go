@@ -16,6 +16,7 @@ type HttpFlags struct {
 	ShowHeaders     bool
 	ShowOnlyHeaders bool
 	CustomHeaders   []string
+	OutputFile      string
 }
 
 func parseFlags() *HttpFlags {
@@ -23,13 +24,27 @@ func parseFlags() *HttpFlags {
 	showOnlyHeaders := pflag.Bool("I", false, "Show only response headers")
 	var customHeaders []string
 	pflag.StringSliceVar(&customHeaders, "H", nil, "Custom headers to include in the request")
+	outputFile := pflag.String("o", "", "Output to file instead of stdout")
+
 	pflag.Parse()
 
 	return &HttpFlags{
 		ShowHeaders:     *showHeaders,
 		ShowOnlyHeaders: *showOnlyHeaders,
 		CustomHeaders:   customHeaders,
+		OutputFile:      *outputFile,
 	}
+}
+
+func CreateOutputFile(fileName string) (*os.File, error) {
+	if fileName == "" {
+		return nil, fmt.Errorf("file name is empty")
+	}
+	file, err := os.Create(fileName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create output file: %w", err)
+	}
+	return file, nil
 }
 
 func parseURL(url string) (string, string, string) {
@@ -66,7 +81,7 @@ func readHeaders(reader *bufio.Reader) (string, bool, error) {
 	return headers.String(), isChunked, nil
 }
 
-func readNonChunkedResponse(reader *bufio.Reader) {
+func readNonChunkedResponse(reader *bufio.Reader, output io.Writer) {
 	buf := make([]byte, 4096)
 	for {
 		n, err := reader.Read(buf)
@@ -76,7 +91,9 @@ func readNonChunkedResponse(reader *bufio.Reader) {
 			}
 			break
 		}
-		os.Stdout.Write(buf[:n])
+		if _, err := output.Write(buf[:n]); err != nil {
+			fmt.Fprintln(os.Stderr, "write error:", err)
+		}
 	}
 }
 
@@ -105,8 +122,8 @@ func readBytes(reader io.Reader, buf []byte) error {
 }
 
 // Writes data to stdout.
-func write(data []byte) error {
-	_, err := fmt.Print(string(data))
+func write(data []byte, output io.Writer) error {
+	_, err := output.Write(data)
 	return err
 }
 
@@ -116,7 +133,7 @@ func discardBytes(reader io.Reader, n int) error {
 	return err
 }
 
-func readChunkedResponse(reader io.Reader) error {
+func readChunkedResponse(reader io.Reader, output io.Writer) error {
 
 	for {
 
@@ -152,7 +169,7 @@ func readChunkedResponse(reader io.Reader) error {
 		}
 
 		// Write chunk data
-		if err := write(chunkData); err != nil {
+		if err := write(chunkData, output); err != nil {
 			return err
 		}
 
@@ -165,7 +182,7 @@ func readChunkedResponse(reader io.Reader) error {
 	return nil
 }
 
-func HttpGet(url string, flags *HttpFlags) error {
+func HttpGet(url string, output io.Writer, flags *HttpFlags) error {
 	host, port, path := parseURL(url)
 	conn, err := net.Dial("tcp", host+":"+port)
 	if err != nil {
@@ -191,16 +208,16 @@ func HttpGet(url string, flags *HttpFlags) error {
 	}
 
 	if flags.ShowHeaders || flags.ShowOnlyHeaders {
-		fmt.Println(headers) // Print headers
+		output.Write([]byte(headers)) // Print headers
 		if flags.ShowOnlyHeaders {
 			return nil // Return early if only headers should be shown
 		}
 	}
 
 	if isChunked {
-		readChunkedResponse(reader)
+		readChunkedResponse(reader, output)
 	} else {
-		readNonChunkedResponse(reader)
+		readNonChunkedResponse(reader, output)
 	}
 
 	return nil
@@ -218,5 +235,19 @@ func main() {
 		url = os.Args[1]
 	}
 	flags := parseFlags()
-	HttpGet(url, flags)
+
+	var output io.Writer
+	output = os.Stdout // Default to stdout
+
+	if flags.OutputFile != "" {
+		file, err := CreateOutputFile(flags.OutputFile)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+		defer file.Close()
+		output = file
+	}
+
+	HttpGet(url, output, flags)
 }

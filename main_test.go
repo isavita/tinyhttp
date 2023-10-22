@@ -128,3 +128,54 @@ func TestHttpGetHeadersOnly(t *testing.T) {
 		t.Fatalf("Expected response to contain headers only, got %q", response)
 	}
 }
+
+func TestHttpGetAcceptHeader(t *testing.T) {
+	mux := http.NewServeMux()
+
+	// Handle requests to the root path
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// Check the Accept header to determine the response format
+		if r.Header.Get("Accept") == "text/plain" {
+			w.Header().Set("Content-Type", "text/plain")
+			fmt.Fprint(w, "Hello, world!")
+		} else if r.Header.Get("Accept") == "application/xml" {
+			w.Header().Set("Content-Type", "application/xml")
+			fmt.Fprint(w, "<greeting>Hello, world!</greeting>")
+		} else {
+			fmt.Println(r.Header.Get("Accept"))
+		}
+	})
+
+	// Start the test server
+	r, w, cleanup := runTestServer(t, mux, "127.0.0.1:8084")
+	defer cleanup()
+
+	// Run the client with the Accept header set to text/plain
+	flags := &HttpFlags{
+		CustomHeaders: []string{"Accept: text/plain"},
+	}
+	response := runHttpGetAndCaptureOutput(t, r, w, "http://127.0.0.1:8084/", flags)
+
+	fmt.Println(response)
+	// Verify the text/plain response
+	expectedResponse := "Hello, world!"
+	if response != expectedResponse {
+		t.Fatalf("Expected response to be %q for text/plain, got %q", expectedResponse, response)
+	}
+
+	// Reset the pipes to capture stdout again
+	r, w, _ = os.Pipe()
+	os.Stdout = w
+
+	// Run the client with the Accept header set to application/xml
+	flags = &HttpFlags{
+		CustomHeaders: []string{"Accept: application/xml"},
+	}
+	response = runHttpGetAndCaptureOutput(t, r, w, "http://127.0.0.1:8084/", flags)
+
+	// Verify the application/xml response
+	expectedResponse = "<greeting>Hello, world!</greeting>"
+	if response != expectedResponse {
+		t.Fatalf("Expected response to be %q for application/xml, got %q", expectedResponse, response)
+	}
+}

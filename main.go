@@ -2,29 +2,33 @@ package main
 
 import (
 	"bufio"
-	"flag"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/spf13/pflag"
 )
 
 type HttpFlags struct {
 	ShowHeaders     bool
 	ShowOnlyHeaders bool
+	CustomHeaders   []string
 }
 
 func parseFlags() *HttpFlags {
-	showHeaders := flag.Bool("i", false, "Show response headers")
-	showOnlyHeaders := flag.Bool("I", false, "Show only response headers")
-
-	flag.Parse()
+	showHeaders := pflag.Bool("i", false, "Show response headers")
+	showOnlyHeaders := pflag.Bool("I", false, "Show only response headers")
+	var customHeaders []string
+	pflag.StringSliceVar(&customHeaders, "H", nil, "Custom headers to include in the request")
+	pflag.Parse()
 
 	return &HttpFlags{
 		ShowHeaders:     *showHeaders,
 		ShowOnlyHeaders: *showOnlyHeaders,
+		CustomHeaders:   customHeaders,
 	}
 }
 
@@ -171,8 +175,10 @@ func HttpGet(url string, flags *HttpFlags) error {
 
 	requestLine := fmt.Sprintf("GET %s HTTP/1.1\r\n", path)
 	requestHeaders := fmt.Sprintf("Host: %s\r\n", host)
+	for _, header := range flags.CustomHeaders {
+		requestHeaders += fmt.Sprintf(header + "\r\n")
+	}
 	requestHeaders += "Connection: close\r\n\r\n"
-
 	request := requestLine + requestHeaders
 	conn.Write([]byte(request))
 

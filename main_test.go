@@ -147,14 +147,14 @@ func TestHttpGetAcceptHeader(t *testing.T) {
 	})
 
 	// Start the test server
-	r, w, cleanup := runTestServer(t, mux, "127.0.0.1:8084")
+	r, w, cleanup := runTestServer(t, mux, "127.0.0.1:8080")
 	defer cleanup()
 
 	// Run the client with the Accept header set to text/plain
 	flags := &HttpFlags{
 		CustomHeaders: []string{"Accept: text/plain"},
 	}
-	response := runHttpGetAndCaptureOutput(t, r, w, "http://127.0.0.1:8084/", flags)
+	response := runHttpGetAndCaptureOutput(t, r, w, "http://127.0.0.1:8080/", flags)
 
 	fmt.Println(response)
 	// Verify the text/plain response
@@ -171,11 +171,42 @@ func TestHttpGetAcceptHeader(t *testing.T) {
 	flags = &HttpFlags{
 		CustomHeaders: []string{"Accept: application/xml"},
 	}
-	response = runHttpGetAndCaptureOutput(t, r, w, "http://127.0.0.1:8084/", flags)
+	response = runHttpGetAndCaptureOutput(t, r, w, "http://127.0.0.1:8080/", flags)
 
 	// Verify the application/xml response
 	expectedResponse = "<greeting>Hello, world!</greeting>"
 	if response != expectedResponse {
 		t.Fatalf("Expected response to be %q for application/xml, got %q", expectedResponse, response)
+	}
+}
+
+func TestHttpGetWithMultipleHeaders(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// Simple authentication check
+		authHeader := r.Header.Get("Authorization")
+		customAuthHeader := r.Header.Get("Custom-Auth")
+		if authHeader == "Basic XXXXX" && customAuthHeader == "SecretToken" {
+			fmt.Fprint(w, "Authentication successful!")
+		} else {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+		}
+	})
+
+	r, w, cleanup := runTestServer(t, mux, "127.0.0.1:8080")
+	defer cleanup()
+
+	// Set up the custom headers
+	flags := &HttpFlags{
+		CustomHeaders: []string{
+			"Authorization: Basic XXXXX",
+			"Custom-Auth: SecretToken",
+		},
+	}
+
+	response := runHttpGetAndCaptureOutput(t, r, w, "http://127.0.0.1:8080/", flags)
+	expectedResponse := "Authentication successful!"
+	if response != expectedResponse {
+		t.Fatalf("Expected response to be %q, got %q", expectedResponse, response)
 	}
 }

@@ -1,37 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 )
-
-func HttpGet(url string) error {
-	host, port, path := parseURL(url)
-	conn, err := net.Dial("tcp", host+":"+port)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-
-	requestLine := fmt.Sprintf("GET %s HTTP/1.1\r\n", path)
-	headers := fmt.Sprintf("Host: %s\r\n", host)
-	headers += "Connection: close\r\n\r\n"
-
-	request := requestLine + headers
-	conn.Write([]byte(request))
-
-	buf := make([]byte, 4096)
-	for {
-		n, err := conn.Read(buf)
-		if err != nil {
-			break
-		}
-		os.Stdout.Write(buf[:n])
-	}
-	return nil
-}
 
 func parseURL(url string) (string, string, string) {
 	parts := strings.Split(url, "/")
@@ -46,6 +23,157 @@ func parseURL(url string) (string, string, string) {
 	}
 	path := "/" + strings.Join(parts[3:], "/")
 	return host, port, path
+}
+
+func readHeaders(reader *bufio.Reader) (string, bool, error) {
+	var headers strings.Builder
+	var isChunked bool
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return "", false, err
+		}
+		headers.WriteString(line)
+		if line == "\r\n" {
+			break // End of headers
+		}
+		if strings.HasPrefix(line, "Transfer-Encoding: chunked") {
+			isChunked = true
+		}
+	}
+	return headers.String(), isChunked, nil
+}
+func readNonChunkedResponse(reader *bufio.Reader) {
+	buf := make([]byte, 4096)
+	for {
+		n, err := reader.Read(buf)
+		if err != nil {
+			if err != io.EOF {
+				fmt.Fprintln(os.Stderr, "read error:", err)
+			}
+			break
+		}
+		os.Stdout.Write(buf[:n])
+	}
+}
+
+// Reads a line from the given reader.
+func readLine(reader io.Reader) (string, error) {
+	bufReader, ok := reader.(*bufio.Reader)
+	if !ok {
+		bufReader = bufio.NewReader(reader)
+	}
+	line, err := bufReader.ReadString('\n')
+	return strings.TrimRight(line, "\r\n"), err
+}
+
+// Trims whitespace characters from a string.
+func trimSpace(line string) string {
+	return strings.TrimSpace(line)
+}
+
+// Parses a string as a hexadecimal integer.
+func parseIntHex(hexString string) (int64, error) {
+	return strconv.ParseInt(hexString, 16, 64)
+}
+
+// Reads bytes into a buffer from a given reader.
+func readBytes(reader io.Reader, buf []byte) error {
+	_, err := io.ReadFull(reader, buf)
+	return err
+}
+
+// Writes data to stdout.
+func write(data []byte) error {
+	_, err := fmt.Print(string(data))
+	return err
+}
+
+// Discards a specified number of bytes from a reader.
+func discardBytes(reader io.Reader, n int) error {
+	_, err := io.CopyN(io.Discard, reader, int64(n))
+	return err
+}
+
+func readChunkedResponse(reader io.Reader) error {
+
+	for {
+
+		// Read chunk size line
+		sizeLine, err := readLine(reader)
+		if err != nil {
+			return err
+		}
+
+		// Trim whitespace
+		sizeLine = trimSpace(sizeLine)
+
+		// Check for empty line
+		if sizeLine == "" {
+			break
+		}
+
+		// Parse chunk size
+		size, err := parseIntHex(sizeLine)
+		if err != nil {
+			return err
+		}
+
+		// End of response
+		if size == 0 {
+			break
+		}
+
+		// Read chunk data
+		chunkData := make([]byte, size)
+		if err := readBytes(reader, chunkData); err != nil {
+			return err
+		}
+
+		// Write chunk data
+		if err := write(chunkData); err != nil {
+			return err
+		}
+
+		// Discard trailing CRLF
+		if err := discardBytes(reader, 2); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func HttpGet(url string) error {
+	host, port, path := parseURL(url)
+	conn, err := net.Dial("tcp", host+":"+port)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	requestLine := fmt.Sprintf("GET %s HTTP/1.1\r\n", path)
+	requestHeaders := fmt.Sprintf("Host: %s\r\n", host)
+	requestHeaders += "Connection: close\r\n\r\n"
+
+	request := requestLine + requestHeaders
+	conn.Write([]byte(request))
+
+	reader := bufio.NewReader(conn)
+
+	// Read headers
+	_, isChunked, err := readHeaders(reader)
+	if err != nil {
+		return err
+	}
+
+	if isChunked {
+		readChunkedResponse(reader)
+	} else {
+		readNonChunkedResponse(reader)
+	}
+
+	return nil
 }
 
 func main() {
